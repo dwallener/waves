@@ -54,7 +54,18 @@ def create_pipe_at_timestep(i):
 
 # Special wave - just a constant, straight line, intended for testing/training
 def create_constant_at_timestep(i):
+
     print ("Constant wave at: ", i)
+    this_ts = np.zeros((resX, resY, resZ))
+
+    # let's just make a half-cube inside the cube
+    for x in range(int(resX/4), int(3*resX/4)):
+        for y in range(int(resX/4), int(3*resX/4)):
+            for z in range(int(resX/4), int(3*resX/4)):
+                this_ts[x,y,z] = 1
+
+    print(this_ts)
+    return this_ts
 
 
 def create_wave_timestep(timestep, wave):
@@ -71,10 +82,16 @@ def create_wave_timestep(timestep, wave):
 wave, ts, resX, resY, resZ = return_args()
 
 # create the wave container
-this_wave = np.zeros((resX, resY, resZ))
+this_wave = np.array([np.zeros((resX, resY, resZ)) for _ in range(ts)])
 
+# generate the timesteps
 for i in range(ts):
-    create_wave_timestep(i, wave)
+    this_wave[i] = create_wave_timestep(i, wave)
+
+# tuck it somewhere safe
+np.save("generated_wave.npy", this_wave)
+# load it with something like...
+# loaded_array_3d = np.load("array_3d.npy")
 
 
 
