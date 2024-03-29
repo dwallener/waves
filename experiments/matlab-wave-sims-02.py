@@ -4,10 +4,10 @@ import numpy
 from matplotlib import pyplot
 from matplotlib import cm
 
-Lx = 10 # total width of the pool
-Nx = 10 # amount of points in the x direction, the more the better
-Ly = 10 # total height of the pool
-Ny = 10 # amount of points in the y direction, the more the better
+Lx = 9 # total width of the pool
+Nx = 9 # amount of points in the x direction, the more the better
+Ly = 9 # total height of the pool
+Ny = 9 # amount of points in the y direction, the more the better
 
 # meshes the x dimension of the domain as being from 0 to Lx and
 # containing Nx points. The linspace function returns an array of
@@ -22,7 +22,7 @@ y_vec = numpy.linspace(0, Ly, Ny)
 dy = y_vec[2] - y_vec[1] # defines dy as the space between 2 points in y
 
 dt = .025 # the amount of time that will pass after every iteration
-dt = .0125 # double the time frequency
+dt = .025 # double the time frequency
 Nt = 1000 # amount of iterations
 
 # this means that the simulation will simulate dt*Nt real seconds of water rippling
@@ -49,14 +49,17 @@ for t in range(1, Nt-1):
 
 print("Big for loop done...plotting")
 
-print("Cross section")
+# single timestep validation
+
+cross_idx = int(Nt/2)
+print("Cross section: ", cross_idx)
 print(u.shape)
-print(u[500][5])
-print(numpy.max(u[500]))
-print(numpy.min(u[500]))
+print(u[50][5])
+print(numpy.max(u[cross_idx]))
+print(numpy.min(u[cross_idx]))
 
 # scale to a more reasonable range, like 0..32 (we're moving to a 64x64 image)
-u_scaled = numpy.interp(u[500][5], ((-1, 1)), (0, 31))
+u_scaled = numpy.interp(u[cross_idx][int(Nx/2)], ((-1, 1)), (0, Lx))
 print("Scaled")
 print(u_scaled)
 
@@ -64,13 +67,20 @@ print(u_scaled)
 u_scaled_int = u_scaled.astype(int)
 print(u_scaled_int)
 # convert to wave profile slice
-wave_profile = numpy.zeros((10,10))
-for i in range(10):
+wave_profile = numpy.zeros((Lx, Nx))
+for i in range(Lx):
     wave_profile[:u_scaled_int[i], i] = 1
 wave_profile = numpy.flipud(wave_profile)
 print("Wave profile")
 print(wave_profile)
 
+mX = 9
+mY = 9
+# ok now convert the entire run
+final_wave = numpy.zeros((Nt, mX, mY))
+for i in range(Nt):
+    for j in range(Lx):
+        final_wave[i, :u_scaled_int[j], j] = 1
 
 fig = pyplot.figure()
 ax = fig.add_subplot(111, projection='3d')
@@ -85,3 +95,6 @@ for t in range(0, Nt):
 
     pyplot.pause(.0001)
     pyplot.cla()
+
+for i in range(0, Nt, 20):
+    print(final_wave[i])
