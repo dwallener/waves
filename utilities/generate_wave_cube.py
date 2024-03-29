@@ -15,6 +15,12 @@
 import sys, argparse
 import numpy as np
 
+# default inputs for wave construction
+default_x = 64
+default_y = 64
+default_z = 64
+default_ts = default_x
+
 def return_args():
         
     parser = argparse.ArgumentParser(description="default arg parser")
@@ -28,10 +34,24 @@ def return_args():
     args = parser.parse_args()
 
     wave = args.wave
-    ts = args.ts
-    resX = args.resX
-    resY = args.resY
-    resZ = args.resZ
+
+    if args.resX:
+        resX = args.resX
+    else:
+        resX = default_x
+    if args.resY:
+        resY = args.resY
+    else:
+        resY = default_y
+    # if no Z dimension given, assume it is 2D
+    if args.resZ:
+        resZ = args.resZ
+    else:
+        resZ = 0
+    if args.ts:
+        ts = args.ts
+    else:
+        ts = default_ts
 
     print ("Wave      : ", wave)
     print ("Timesteps : ", ts)
@@ -46,11 +66,19 @@ def return_args():
 
 def create_chopes_at_timestep(i):
     print ("Chopes timestep: ", i)
+    
 
 
 def create_pipe_at_timestep(i):
     print ("Pipe timestep: ", i)
 
+
+def create_jaws_at_timestep(i):
+    print ("Pipe timestep: ", i)
+
+
+def create_nazare_at_timestep(i):
+    print ("Pipe timestep: ", i)
 
 # Special wave - just a constant, straight line, intended for testing/training
 def create_constant_at_timestep(i):
@@ -74,6 +102,10 @@ def create_wave_timestep(timestep, wave):
         create_chopes_at_timestep(timestep)
     if wave == "pipe":
         create_pipe_at_timestep(timestep)
+    if wave == "nazare":
+        create_nazare_at_timestep(timestep)
+    if wave == "jaws":
+        create_jaws_at_timestep(timestep)
     if wave == "constant":
         create_constant_at_timestep(timestep)
 
