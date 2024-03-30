@@ -21,10 +21,17 @@ from matplotlib.animation import FuncAnimation
 device = torch.device('cuda' if torch.cuda.is_available() else 'mps')
 
 # some run length vars
-training_size = 100
-num_epochs = 5
+training_size = 1000
+val_size = 1000
+num_epochs = 50
 learning_rate = 0.001
 test_skip_rate = 10 # stride size through post-training validation test
+
+# log the parameters
+print("Training Size  : ", training_size)
+print("Validation Size: ", val_size)
+print("Epochs to train: ", num_epochs)
+print("Learning Rate  :", learning_rate)
 
 # Original ConvLSTM cell as proposed by Shi et al.
 class ConvLSTMCell(nn.Module):
@@ -164,6 +171,20 @@ class Seq2Seq(nn.Module):
 
 # Load Data as Numpy Array
 MovingMNIST = np.load('mnist_test_seq.npy').transpose(1, 0, 2, 3)
+print("Original dataset shape: ", MovingMNIST.shape)
+
+MovingWave = np.load('wave-disturbance-01-100000ts-64px.npy')
+print("Original wave shape: ", MovingWave.shape)
+
+# reshape into 20-slice chunks.
+MovingWave = MovingWave.reshape(5000, 20, 64 ,64).astype(np.float32)
+
+# the shape is 10000 timesetps X 20 animations X 64 pixels X 64 pixels
+# our wave sim is 1000/10000 timesetps x 1 animation X 64 pixels X 64 pixels
+#
+# for simplicity sake, let's just use the same format so we don't have to 
+# reshape anything downstream...at least it allows us to shuffle on the 20
+# which should be ok
 
 # Shuffle Data
 np.random.shuffle(MovingMNIST)
@@ -174,9 +195,14 @@ np.random.shuffle(MovingMNIST)
 #test_data = MovingMNIST[9000:10000]
 
 # mini set for testing
-train_data = MovingMNIST[:training_size]
-val_data = MovingMNIST[training_size:training_size+100]
-test_data = MovingMNIST[training_size+100:training_size+200]
+#train_data = MovingMNIST[:training_size]
+#val_data = MovingMNIST[training_size:training_size+100]
+#test_data = MovingMNIST[training_size+100:training_size+200]
+
+np.random.shuffle(MovingWave)
+train_data = MovingWave[:training_size]
+val_data = MovingWave[training_size:training_size+val_size]
+test_data = MovingWave[training_size+val_size: training_size+val_size*2]
 
 # TODO: save tensor and reload as tensor, because this is a slooooow step
 tensor_save_path = "nist-tensor.pt"

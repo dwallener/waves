@@ -4,13 +4,14 @@ import numpy
 from matplotlib import pyplot
 from matplotlib import cm
 
-np_save_file_1000 = "wave-disturbance-01-1000ts.npy"
-np_save_file_10000 = "wave-disturbance-01-10000ts.npy"
+np_save_file_1000 = "wave-disturbance-01-1000ts-64px.npy"
+np_save_file_10000 = "wave-disturbance-01-10000ts-64px.npy"
+np_save_file_100000 = "wave-disturbance-01-100000ts-64px.npy"
 
-Lx = 9 # total width of the pool
-Nx = 9 # amount of points in the x direction, the more the better
-Ly = 9 # total height of the pool
-Ny = 9 # amount of points in the y direction, the more the better
+Lx = 10 # total width of the pool
+Nx = 64 # amount of points in the x direction, the more the better
+Ly = 10 # total height of the pool
+Ny = 64 # amount of points in the y direction, the more the better
 
 # meshes the x dimension of the domain as being from 0 to Lx and
 # containing Nx points. The linspace function returns an array of
@@ -26,12 +27,15 @@ dy = y_vec[2] - y_vec[1] # defines dy as the space between 2 points in y
 
 dt = .025 # the amount of time that will pass after every iteration
 dt = .025 # double the time frequency
-Nt = 10000 # amount of iterations
+Nt = 100000 # amount of iterations
 
+print ("Timesteps : ", Nt)
 if Nt == 1000:
     np_save_file = np_save_file_1000
 if Nt == 10000:
     np_save_file = np_save_file_10000
+if Nt == 100000:
+    np_save_file = np_save_file_100000
 
 # this means that the simulation will simulate dt*Nt real seconds of water rippling
 
