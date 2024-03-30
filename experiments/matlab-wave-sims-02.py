@@ -4,6 +4,9 @@ import numpy
 from matplotlib import pyplot
 from matplotlib import cm
 
+np_save_file_1000 = "wave-disturbance-01-1000ts.npy"
+np_save_file_10000 = "wave-disturbance-01-10000ts.npy"
+
 Lx = 9 # total width of the pool
 Nx = 9 # amount of points in the x direction, the more the better
 Ly = 9 # total height of the pool
@@ -23,7 +26,12 @@ dy = y_vec[2] - y_vec[1] # defines dy as the space between 2 points in y
 
 dt = .025 # the amount of time that will pass after every iteration
 dt = .025 # double the time frequency
-Nt = 1000 # amount of iterations
+Nt = 10000 # amount of iterations
+
+if Nt == 1000:
+    np_save_file = np_save_file_1000
+if Nt == 10000:
+    np_save_file = np_save_file_10000
 
 # this means that the simulation will simulate dt*Nt real seconds of water rippling
 
@@ -51,12 +59,11 @@ print("Big for loop done...plotting")
 
 # single timestep validation
 
-cross_idx = int(Nt/2)
-print("Cross section: ", cross_idx)
+cross_idx = int(Nt/4)
+print("Cross section @ts: ", cross_idx)
 print(u.shape)
-print(u[50][5])
+print(u[cross_idx][int(Lx/2)])
 print(numpy.max(u[cross_idx]))
-print(numpy.min(u[cross_idx]))
 
 # scale to a more reasonable range, like 0..32 (we're moving to a 64x64 image)
 u_scaled = numpy.interp(u[cross_idx][int(Nx/2)], ((-1, 1)), (0, Lx))
@@ -66,6 +73,7 @@ print(u_scaled)
 # convert to int
 u_scaled_int = u_scaled.astype(int)
 print(u_scaled_int)
+
 # convert to wave profile slice
 wave_profile = numpy.zeros((Lx, Nx))
 for i in range(Lx):
@@ -74,13 +82,24 @@ wave_profile = numpy.flipud(wave_profile)
 print("Wave profile")
 print(wave_profile)
 
-mX = 9
-mY = 9
+mX = Nx
+mY = Ny
+
+# i'm using a slice, not the entire u! TODO: fix this!
 # ok now convert the entire run
 final_wave = numpy.zeros((Nt, mX, mY))
+
 for i in range(Nt):
-    for j in range(Lx):
-        final_wave[i, :u_scaled_int[j], j] = 1
+    for j in range(Nx):
+        u_scaled_int = numpy.interp(u[i][int(Nx/2)], ((-1, 1)), (0, Nx)).astype(int)
+        final_wave[i,:u_scaled_int[j], j] = 1
+
+numpy.save(np_save_file, final_wave)
+
+final_wave = numpy.fliplr(final_wave)
+for i in range(359, 469, 11):
+    print("Timestep: ", i)
+    print(final_wave[i])
 
 fig = pyplot.figure()
 ax = fig.add_subplot(111, projection='3d')
@@ -96,5 +115,3 @@ for t in range(0, Nt):
     pyplot.pause(.0001)
     pyplot.cla()
 
-for i in range(0, Nt, 20):
-    print(final_wave[i])
