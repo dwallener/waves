@@ -67,6 +67,9 @@ if target_device == 'cuda':
         device = 'cuda'
     else:
         device = 'cpu'
+        print("No CUDA!")
+
+print("Retargetting to: ", device)
 
 wave_file = "wave-disturbance-01-" + str(training_size) + "ts-64px.npy"
 
