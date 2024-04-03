@@ -16,22 +16,68 @@ from ipywidgets import widgets, HBox
 from IPython.display import display
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-
-# set device to Silicon
-device = torch.device('cuda' if torch.cuda.is_available() else 'mps')
+import argparse
 
 # some run length vars
+target_device = 'cpu'
 training_size = 1000
-val_size = 1000
-num_epochs = 50
+val_size = 250
+num_epochs = 5
 learning_rate = 0.001
 test_skip_rate = 10 # stride size through post-training validation test
 
-# log the parameters
+
+# do args stuff
+parser = argparse.ArgumentParser()
+
+parser.add_argument('--target', required=False)
+parser.add_argument('--ts', required=False)
+parser.add_argument('--epochs', required=False)
+parser.add_argument('--lr', required=False)
+
+args = parser.parse_args()
+
+if args.target is not None:
+    target_device = args.target
+
+if args.ts:
+    training_size = int(args.ts)
+    val_size = int(args.ts)
+
+if args.epochs:
+    num_epochs = int(args.epochs)
+
+if args.lr:
+    learning_rate = float(args.lr) 
+
+
+
+# set device to proper target
+
+device = 'cpu'
+
+if target_device == 'mps':
+    if torch.backends.mps.is_available():
+        device = 'mps'
+    else:
+        device = 'cpu'
+
+if target_device == 'cuda':
+    if torch.cuda.is_available():
+        device = 'cuda'
+    else:
+        device = 'cpu'
+
+wave_file = "wave-disturbance-01-" + str(training_size) + "ts-64px.npy"
+
+# show the run params
+print("Run conditions:")
 print("Training Size  : ", training_size)
 print("Validation Size: ", val_size)
 print("Epochs to train: ", num_epochs)
 print("Learning Rate  :", learning_rate)
+print("Target device  :", device)
+print("Dataset        :", wave_file)
 
 # Original ConvLSTM cell as proposed by Shi et al.
 class ConvLSTMCell(nn.Module):
@@ -167,18 +213,14 @@ class Seq2Seq(nn.Module):
         return nn.Sigmoid()(output)
 
 
-# import the movingNIST data, it's fetched as pre-numpified
 
-# Load Data as Numpy Array
-MovingMNIST = np.load('mnist_test_seq.npy').transpose(1, 0, 2, 3)
-print("Original dataset shape: ", MovingMNIST.shape)
-
-MovingWave = np.load('wave-disturbance-01-100000ts-64px.npy')
+#MovingWave = np.load('wave-disturbance-01-100000ts-64px.npy')
+MovingWave = np.load(wave_file)
 print("Original wave shape: ", MovingWave.shape)
 
 # reshape into 20-slice chunks.
-MovingWave = MovingWave.reshape(5000, 20, 64 ,64).astype(np.float32)
-
+MovingWave = MovingWave.reshape(int(training_size/20), 20, 64, 64).astype(np.float32)
+print("Reshaped wave shape:", MovingWave.shape)
 # the shape is 10000 timesetps X 20 animations X 64 pixels X 64 pixels
 # our wave sim is 1000/10000 timesetps x 1 animation X 64 pixels X 64 pixels
 #
@@ -186,23 +228,14 @@ MovingWave = MovingWave.reshape(5000, 20, 64 ,64).astype(np.float32)
 # reshape anything downstream...at least it allows us to shuffle on the 20
 # which should be ok
 
-# Shuffle Data
-np.random.shuffle(MovingMNIST)
-
-# Train, Test, Validation splits
-#train_data = MovingMNIST[:8000]
-#val_data = MovingMNIST[8000:9000]
-#test_data = MovingMNIST[9000:10000]
-
-# mini set for testing
-#train_data = MovingMNIST[:training_size]
-#val_data = MovingMNIST[training_size:training_size+100]
-#test_data = MovingMNIST[training_size+100:training_size+200]
 
 np.random.shuffle(MovingWave)
-train_data = MovingWave[:training_size]
-val_data = MovingWave[training_size:training_size+val_size]
-test_data = MovingWave[training_size+val_size: training_size+val_size*2]
+train_idx = int(training_size/20)
+train_frac = int(train_idx/4)
+val_idx = train_idx
+train_data = MovingWave[:train_frac*2]
+val_data = MovingWave[train_frac*2:train_frac*3]
+test_data = MovingWave[train_idx*3: train_idx*4]
 
 # TODO: save tensor and reload as tensor, because this is a slooooow step
 tensor_save_path = "nist-tensor.pt"
@@ -214,8 +247,8 @@ def collate(batch):
     batch = batch / 255.0
     batch = batch.to(device)
     # Randomly pick 10 frames as input, 11th frame is target
-    rand = np.random.randint(10,20)
-    return batch[:,:,rand-10:rand], batch[:,:,rand]
+    rand = np.random.randint(10, 20)
+    return batch[:, :, rand-10:rand], batch[:, :, rand]
 
 
 # Training Data Loader
