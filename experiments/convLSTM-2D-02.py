@@ -235,7 +235,7 @@ train_frac = int(train_idx/4)
 val_idx = train_idx
 train_data = MovingWave[:train_frac*2]
 val_data = MovingWave[train_frac*2:train_frac*3]
-test_data = MovingWave[train_idx*3: train_idx*4]
+test_data = MovingWave[train_frac*3: train_frac*4]
 
 # TODO: save tensor and reload as tensor, because this is a slooooow step
 tensor_save_path = "nist-tensor.pt"
@@ -318,8 +318,8 @@ for epoch in range(1, num_epochs+1):
 def collate_test(batch):
 
     # Last 10 frames are target
-    target = np.array(batch)[:,10:]                     
-    
+    target = np.array(batch)[:, 10:]           
+
     # Add channel dim, scale pixels between 0 and 1, send to GPU
     batch = torch.tensor(batch).unsqueeze(1)          
     batch = batch / 255.0                             
