@@ -8,15 +8,15 @@ from torch.optim import Adam
 # just include the class files here
 # from Seq2Seq import Seq2Seq
 from torch.utils.data import DataLoader
+from Seq2Seq import Seq2Seq
 
 import io
 import os
 import imageio
-from ipywidgets import widgets, HBox
-from IPython.display import display
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import argparse
+import time
 
 # some run length vars
 target_device = 'cpu'
@@ -50,8 +50,6 @@ if args.epochs:
 if args.lr:
     learning_rate = float(args.lr) 
 
-
-
 # set device to proper target
 
 device = 'cpu'
@@ -82,148 +80,45 @@ print("Learning Rate  :", learning_rate)
 print("Target device  :", device)
 print("Dataset        :", wave_file)
 
-# Original ConvLSTM cell as proposed by Shi et al.
-class ConvLSTMCell(nn.Module):
+# Support function for displaying image sequneces
 
-    def __init__(self, in_channels, out_channels, kernel_size, padding, activation, frame_size):
-
-        super(ConvLSTMCell, self).__init__()  
-
-        if activation == "tanh":
-            self.activation = torch.tanh
-        elif activation == "relu":
-            self.activation = torch.relu
-        
-        # Idea adapted from https://github.com/ndrplz/ConvLSTM_pytorch
-        self.conv = nn.Conv2d(
-            in_channels=in_channels + out_channels, 
-            out_channels=4 * out_channels, 
-            kernel_size=kernel_size, 
-            padding=padding)           
-
-        # Initialize weights for Hadamard Products
-        self.W_ci = nn.Parameter(torch.Tensor(out_channels, *frame_size))
-        self.W_co = nn.Parameter(torch.Tensor(out_channels, *frame_size))
-        self.W_cf = nn.Parameter(torch.Tensor(out_channels, *frame_size))
-
-    def forward(self, X, H_prev, C_prev):
-
-        # Idea adapted from https://github.com/ndrplz/ConvLSTM_pytorch
-        conv_output = self.conv(torch.cat([X, H_prev], dim=1))
-
-        # Idea adapted from https://github.com/ndrplz/ConvLSTM_pytorch
-        i_conv, f_conv, C_conv, o_conv = torch.chunk(conv_output, chunks=4, dim=1)
-
-        input_gate = torch.sigmoid(i_conv + self.W_ci * C_prev )
-        forget_gate = torch.sigmoid(f_conv + self.W_cf * C_prev )
-
-        # Current Cell output
-        C = forget_gate*C_prev + input_gate * self.activation(C_conv)
-
-        output_gate = torch.sigmoid(o_conv + self.W_co * C )
-
-        # Current Hidden State
-        H = output_gate * self.activation(C)
-
-        return H, C
+def display_image_sequence(images, start_index):
+    """
+    Display 20 images in sequence, starting from the given index.
     
-
-class ConvLSTM(nn.Module):
-
-    def __init__(self, in_channels, out_channels, kernel_size, padding, activation, frame_size):
-
-        super(ConvLSTM, self).__init__()
-
-        self.out_channels = out_channels
-
-        # We will unroll this over time steps
-        self.convLSTMcell = ConvLSTMCell(in_channels, out_channels, kernel_size, padding, activation, frame_size)
-
-    def forward(self, X):
-
-        # X is a frame sequence (batch_size, num_channels, seq_len, height, width)
-
-        # Get the dimensions
-        batch_size, _, seq_len, height, width = X.size()
-
-        # Initialize output
-        output = torch.zeros(batch_size, self.out_channels, seq_len, height, width, device=device)
-
-        # Initialize Hidden State
-        H = torch.zeros(batch_size, self.out_channels, height, width, device=device)
-
-        # Initialize Cell Input
-        C = torch.zeros(batch_size,self.out_channels, height, width, device=device)
-
-        # Unroll over time steps
-        for time_step in range(seq_len):
-
-            H, C = self.convLSTMcell(X[:,:,time_step], H, C)
-
-            output[:,:,time_step] = H
-
-        return output
+    :param images: A numpy array of shape (1000, 64, 64) where each element is a 64x64 image.
+    :param start_index: The index of the first image to display.
+    """
+    
+    # Ensure start_index is within the range of the images array
+    if start_index < 0 or start_index >= len(images) - 20:
+        raise ValueError("Start index is out of the valid range.")
+    
+    # Prepare the figure and axes for animation
+    fig, ax = plt.subplots()
+    ax.axis('off')  # Turn off axis
+    
+    # Function to update the frame
+    def update(i):
+        ax.imshow(images[start_index + i], cmap='gray')
+        ax.set_title(f'Image Index: {start_index + i}')
+    
+    # Create animation
+    ani = FuncAnimation(fig, update, frames=20, interval=500)  # Update every 500 ms
+    
+    plt.show()
 
 
-class Seq2Seq(nn.Module):
-
-    def __init__(self, num_channels, num_kernels, kernel_size, padding, 
-    activation, frame_size, num_layers):
-
-        super(Seq2Seq, self).__init__()
-
-        self.sequential = nn.Sequential()
-
-        # Add First layer (Different in_channels than the rest)
-        self.sequential.add_module(
-            "convlstm1", ConvLSTM(
-                in_channels=num_channels, out_channels=num_kernels,
-                kernel_size=kernel_size, padding=padding, 
-                activation=activation, frame_size=frame_size)
-        )
-
-        self.sequential.add_module(
-            "batchnorm1", nn.BatchNorm3d(num_features=num_kernels)
-        ) 
-
-        # Add rest of the layers
-        for l in range(2, num_layers+1):
-
-            self.sequential.add_module(
-                f"convlstm{l}", ConvLSTM(
-                    in_channels=num_kernels, out_channels=num_kernels,
-                    kernel_size=kernel_size, padding=padding, 
-                    activation=activation, frame_size=frame_size)
-                )
-
-            self.sequential.add_module(
-                f"batchnorm{l}", nn.BatchNorm3d(num_features=num_kernels)
-                ) 
-
-        # Add Convolutional Layer to predict output frame
-        self.conv = nn.Conv2d(
-            in_channels=num_kernels, out_channels=num_channels,
-            kernel_size=kernel_size, padding=padding)
-
-    def forward(self, X):
-
-        # Forward propagation through all the layers
-        output = self.sequential(X)
-
-        # Return only the last output frame
-        output = self.conv(output[:,:,-1])
-
-        return nn.Sigmoid()(output)
-
-
+# Original ConvLSTM cell as proposed by Shi et al.
+# Class Seq2Seq now tucked away in its own source file
 
 #MovingWave = np.load('wave-disturbance-01-100000ts-64px.npy')
 MovingWave = np.load(wave_file)
 print("Original wave shape: ", MovingWave.shape)
 
 # reshape into 20-slice chunks.
-MovingWave = MovingWave.reshape(int(training_size/20), 20, 64, 64).astype(np.float32)
-print("Reshaped wave shape:", MovingWave.shape)
+MovingWaveReshape = MovingWave.reshape(int(training_size/20), 20, 64, 64).astype(np.float32)
+print("Reshaped wave shape:", MovingWaveReshape.shape)
 # the shape is 10000 timesetps X 20 animations X 64 pixels X 64 pixels
 # our wave sim is 1000/10000 timesetps x 1 animation X 64 pixels X 64 pixels
 #
@@ -232,13 +127,13 @@ print("Reshaped wave shape:", MovingWave.shape)
 # which should be ok
 
 
-np.random.shuffle(MovingWave)
+np.random.shuffle(MovingWaveReshape)
 train_idx = int(training_size/20)
 train_frac = int(train_idx/4)
 val_idx = train_idx
-train_data = MovingWave[:train_frac*2]
-val_data = MovingWave[train_frac*2:train_frac*3]
-test_data = MovingWave[train_frac*3: train_frac*4]
+train_data = MovingWaveReshape[:train_frac*2]
+val_data = MovingWaveReshape[train_frac*2:train_frac*3]
+test_data = MovingWaveReshape[train_frac*3: train_frac*4]
 
 # TODO: save tensor and reload as tensor, because this is a slooooow step
 tensor_save_path = "nist-tensor.pt"
@@ -266,10 +161,18 @@ input, _ = next(iter(val_loader))
 # Reverse process before displaying
 input = input.cpu().numpy() * 255.0     
 
-for video in input.squeeze(1)[:3]:          # Loop over videos
-    with io.BytesIO() as gif:
-        imageio.mimsave(gif,video.astype(np.uint8),"GIF",fps=5)
-        display(HBox([widgets.Image(value=gif.getvalue())]))
+print("First viz")
+N = 20
+#display_image_sequence(MovingWave, N)
+
+print("Second viz")
+N = 20
+#display_image_sequence(MovingWaveReshape[0,1,:,:])
+
+#for video in input.squeeze(1)[:3]:          # Loop over videos
+#    with io.BytesIO() as gif:
+#        imageio.mimsave(gif,video.astype(np.uint8),"GIF",fps=5)
+#        display(HBox([widgets.Image(value=gif.getvalue())]))
 
 # TODO: replace above with matplotlib because notebooks suck
 #fig, ax = plt.subplots()
@@ -283,7 +186,7 @@ for video in input.squeeze(1)[:3]:          # Loop over videos
 
 
 # The input video frames are grayscale, thus single channel
-model = Seq2Seq(num_channels=1, num_kernels=64, kernel_size=(3, 3), padding=(1, 1), activation="relu", frame_size=(64, 64), num_layers=3).to(device)
+model = Seq2Seq(num_channels=1, num_kernels=64, kernel_size=(3, 3), padding=(1, 1), activation="relu", frame_size=(64, 64), num_layers=3, device=device).to(device)
 
 optim = Adam(model.parameters(), lr=learning_rate)
 
@@ -355,18 +258,3 @@ for i in range(10):
     im = ax2.imshow(output[1, i, :, :])
     plt.show()
 
-for tgt, out in zip(target, output):       # Loop over samples
-    
-    # Write target video as gif
-    with io.BytesIO() as gif:
-        imageio.mimsave(gif, tgt, "GIF", fps=5)    
-        target_gif = gif.getvalue()
-
-    # Write output video as gif
-    with io.BytesIO() as gif:
-        imageio.mimsave(gif, out, "GIF", fps=5)    
-        output_gif = gif.getvalue()
-
-    display(HBox([widgets.Image(value=target_gif), 
-                  widgets.Image(value=output_gif)]))
-    
