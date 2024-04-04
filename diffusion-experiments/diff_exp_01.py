@@ -4,12 +4,19 @@
 
 # basic imports
 
+import wandb
+from time import perf_counter
+from fastprogress import progress_bar
+
 import matplotlib.pyplot as plt
 from functools import partial
 from types import SimpleNamespace
-from torchvision.datasets import MNIST
 
-from data import apply_n_times, padding, RandomTrajectory
+from torchvision.datasets import MNIST
+from torch.utils.data import DataLoader
+
+from data import apply_n_times, padding, RandomTrajectory, MovingMNIST
+from utils import show_image, show_images
 
 
 # pull static MNIST images (this is where we can drop in our own images to animate)
@@ -21,8 +28,8 @@ print(mnist.data.shape)
 
 # visualize the dataset
 
-from utils import show_image, show_images
 show_images(mnist.data[0:5])
+plt.show()
 
 # generate moving sequence
 
@@ -46,13 +53,13 @@ scale = 1.3 # scaling in percentage (1.0 = no scaling)
 translate = (2,3) # translation in pixels
 shear = 15 # deformation on the z-plane
 
-show_image(TF.affine(digit, angle, translate, scale, shear))
-plt.show()
+# show_image(TF.affine(digit, angle, translate, scale, shear))
+# plt.show()
 
 padding(64)
 pdigit = TF.pad(digit, padding=18)  #18 give us a 64x64 image (18x2 + 28)
-show_image(pdigit)
-plt.show()
+# show_image(pdigit)
+# plt.show()
 
 tf = partial(TF.affine, angle=angle, translate=(-7,3), scale=scale, shear=shear)
 # show_image(tf(pdigit))
@@ -99,6 +106,61 @@ def random_place(img, img_size=64):
     return move(img, translate=(x,y))
      
 
-show_image(random_place(pdigit))
+# show_image(random_place(pdigit))
+# plt.show()
+
+# ok let's generate some dataset
+
+print(mnist[0])
+print(affine_params)
+ds = MovingMNIST(affine_params=affine_params, num_frames=5)
+show_images(ds._one_moving_digit())
 plt.show()
+digits = ds[0]
+print(digits.shape)
+show_images(digits)
+plt.show()
+
+# looks good! 
+
+b = ds.get_batch(bs=32)
+print(b.shape)
+b = ds.get_batch(512)
+
+# not sure what this section is about
+# building it piece by piece, waiting for the meltdown
+
+def cycle(bs=512, n=10):
+    for _ in progress_bar(range(n), total=n):
+        ti = perf_counter()
+        b = ds.get_batch(bs)
+        tf = perf_counter()
+        print(f"Run took: {tf-ti:2.3f}s")
+        if wandb.run is not None: wandb.log({"time_per_batch":tf-ti})
+
+config = dict(bs=512, n=10)
+
+with wandb.init(project="miniai_ddpm", job_type="dataloader_perf", config=config):
+    cycle(config["bs"], config["n"])
+
+ds.save(n_batches=10, bs=512)
+
+def cycle_dl(bs=512, n=10):
+    dl = iter(DataLoader(torch.load("mmnist.pt"), batch_size=bs))
+    for _ in progress_bar(range(n), total=n):
+        ti = perf_counter()
+        b = next(dl)
+        tf = perf_counter()
+        print(f"Run took: {tf-ti:2.3f}s")
+        if wandb.run is not None: wandb.log({"time_per_batch":tf-ti})
+     
+
+with wandb.init(project="miniai_ddpm", job_type="dataloader_perf", tags=["from_mem"], config=config):
+    cycle_dl()
+
+ds.concat=False
+
+type(ds[0]), ds[0][0].shape
+
+import nbdev; nbdev.nbdev_export()
 
