@@ -162,5 +162,135 @@ ds.concat=False
 
 type(ds[0]), ds[0][0].shape
 
-import nbdev; nbdev.nbdev_export()
+# import nbdev; nbdev.nbdev_export()
+
+# now prepare data for training
+
+import logging
+from pathlib import Path
+from functools import partial
+from types import SimpleNamespace
+
+from fastprogress import progress_bar
+import fastcore.all as fc
+import matplotlib as mpl, matplotlib.pyplot as plt
+
+import wandb
+
+import torch
+from torch import optim, nn
+from torch.nn import init
+from torch.utils.data import DataLoader, default_collate
+from diffusers import UNet2DModel, DDIMScheduler
+
+from miniminiai import DataLoaders, show_images, Learner, AccelerateCB, ProgressCB, MetricsCB, BatchSchedCB, Callback
+
+mpl.rcParams['image.cmap'] = 'gray_r'
+logging.disable(logging.WARNING)
+
+config = SimpleNamespace(    
+    epochs = 15,
+    model_name="ddpm_mmnist_miniai",
+    noise_steps=1000,
+    seed = 42,
+    batch_size = 128,
+    img_size = 64,
+    device = "cuda",
+    use_wandb = True,
+    num_workers=2,
+    num_frames=3,
+    lr = 1e-3)
+
+# uncomment this block if dataset isn't already local
+'''
+DATASET_AT = 'capecape/miniai_ddpm/MMNIST40_20k:latest'
+
+api = wandb.Api()
+dataset = api.artifact(DATASET_AT)
+dataset_folder = Path(dataset.download())
+
+ds = torch.load(next(dataset_folder.glob("*.pt"))) - 0.5
+'''
+
+ds = torch.load("mmnist.pt") - 0.5
+ds = ds[0:3000]
+
+print(ds.device)
+print(ds.shape)
+
+split_val = int(0.9*len(ds))
+train_ds = ds[:split_val].squeeze()
+valid_ds = ds[split_val:].squeeze()
+
+xb = train_ds[:4]
+
+# TODO: Why doesn't it like the reshape?
+show_images(xb.reshape(-1, 1, config.img_size, config.img_size), imsize=1.5)
+plt.show()
+
+betamin,betamax,n_steps = 0.0001,0.02, 1000
+beta = torch.linspace(betamin, betamax, n_steps)
+alpha = 1.-beta
+alphabar = alpha.cumprod(dim=0)
+sigma = beta.sqrt()
+
+
+def noisify_ddpm(x0):
+    "Noise by ddpm"
+    device = x0.device
+    n = len(x0)
+    t = torch.randint(0, n_steps, (n,), dtype=torch.long)
+    ε = torch.randn(x0.shape, device=device)
+    ᾱ_t = alphabar[t].reshape(-1, 1, 1, 1).to(device)
+    xt = ᾱ_t.sqrt()*x0 + (1-ᾱ_t).sqrt()*ε
+    return xt, t.to(device), ε
+
+
+def noisify_last_frame(frames, noise_func):
+    "Noisify the last frame of a sequence"
+    past_frames = frames[:,:-1]
+    last_frame  = frames[:,-1:]
+    noise, t, e = noise_func(last_frame)
+    return torch.cat([past_frames, noise], dim=1), t, e
+
+
+def noisify_collate(noise_func): 
+    def _inner(b): 
+        "Collate function that noisifies the last frame"
+        return noisify_last_frame(default_collate(b), noise_func)
+    return _inner
+
+
+class NoisifyDataloader(DataLoader):
+    """Noisify the last frame of a dataloader by applying 
+    a noise function, after collating the batch"""
+    def __init__(self, dataset, *args, noise_func=noisify_ddpm, **kwargs):
+        super().__init__(dataset, *args, collate_fn=noisify_collate(noise_func), **kwargs)
+
+
+xt, t, ε = noisify_last_frame(xb[:4], noisify_ddpm)
+print(t)
+print(xt.shape)
+
+titles = fc.map_ex(t, '{}')
+titles = fc.concat(zip([[None, None, None]]*len(titles), titles)) 
+show_images(xt.reshape(-1, 1, config.img_size, config.img_size), imsize=1.5, titles=titles)
+plt.show()
+
+
+def init_ddpm(model):
+    for o in model.down_blocks:
+        for p in o.resnets:
+            p.conv2.weight.data.zero_()
+            for p in fc.L(o.downsamplers): init.orthogonal_(p.conv.weight)
+
+    for o in model.up_blocks:
+        for p in o.resnets: p.conv2.weight.data.zero_()
+
+    model.conv_out.weight.data.zero_()
+
+
+dls = DataLoaders(NoisifyDataloader(train_ds, config.batch_size, num_workers=config.num_workers, pin_memory=True, shuffle=True), 
+                  NoisifyDataloader(valid_ds, config.batch_size, num_workers=config.num_workers, shuffle=False))
+
 
