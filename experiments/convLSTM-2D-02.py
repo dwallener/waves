@@ -5,6 +5,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.optim import Adam
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+
 # just include the class files here
 # from Seq2Seq import Seq2Seq
 from torch.utils.data import DataLoader
@@ -192,9 +194,10 @@ input = input.cpu().numpy() * 255.0
 
 
 # The input video frames are grayscale, thus single channel
-model = Seq2Seq(num_channels=1, num_kernels=64, kernel_size=(3, 3), padding=(1, 1), activation="relu", frame_size=(64, 64), num_layers=3, device=device).to(device)
+model = Seq2Seq(num_channels=1, num_kernels=64, kernel_size=(3, 3), padding=(1, 1), activation="relu", frame_size=(64, 64), num_layers=7, device=device).to(device)
 
 optim = Adam(model.parameters(), lr=learning_rate)
+scheduler = ReduceLROnPlateau(optim, 'min')
 
 # Binary Cross Entropy, target pixel values either 0 or 1
 criterion = nn.BCELoss(reduction='sum')
@@ -232,16 +235,21 @@ for epoch in range(1, num_epochs+1):
             loss = criterion(output.flatten(), target.flatten())   
             val_loss += loss.item()                                
     val_loss /= len(val_loader.dataset)                            
+    scheduler.step(val_loss)
 
+    print("END OF EPOCH ***********************************************")
     print("Epoch:{} Training Loss:{:.2f} Validation Loss:{:.2f}\n".format(
         epoch, train_loss, val_loss))
-    path = "checkpoint-" + str(epoch) + ".pt"
-    torch.save({
-        'epoch': epoch,
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optim.state_dict(),
-        'loss': train_loss,
-            }, path)
+    print("New learning rate: ", scheduler.get_last_lr())
+    path = "this_run/checkpoint-" + str(epoch) + ".pt"
+    if (epoch % 50 == 0):
+        print("Saving checkpoint...")
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optim.state_dict(),
+            'loss': train_loss,
+                }, path)
     
     # end of epoch...let's take a look-see
 
@@ -260,6 +268,7 @@ for epoch in range(1, num_epochs+1):
         print("Input shape: ", input.shape)
         print("Target Shape: ", target.shape)
         print("Output Shape: ", output.shape)
+        print("")
         display_image_sequence(input.cpu(), 0, 1)
         display_image_sequence(target.cpu(), 0, 1)
         display_image_sequence(output.cpu(), 0, 1)
