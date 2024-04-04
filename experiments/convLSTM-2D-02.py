@@ -20,12 +20,12 @@ import time
 
 # some run length vars
 target_device = 'cpu'
-training_size = 1000
+training_size = 10000
 val_size = 250
 num_epochs = 5
 learning_rate = 0.001
-test_skip_rate = 10 # stride size through post-training validation test
-
+# set True for end of epoch display of input/output
+visualize = True
 
 # do args stuff
 parser = argparse.ArgumentParser()
@@ -82,7 +82,7 @@ print("Dataset        :", wave_file)
 
 # Support function for displaying image sequneces
 
-def display_image_sequence(images, start_index):
+def display_image_sequence(images, start_index, max_frames):
     """
     Display 20 images in sequence, starting from the given index.
     
@@ -91,7 +91,7 @@ def display_image_sequence(images, start_index):
     """
     
     # Ensure start_index is within the range of the images array
-    if start_index < 0 or start_index >= len(images) - 20:
+    if start_index < 0 or start_index >= len(images) - max_frames:
         raise ValueError("Start index is out of the valid range.")
     
     # Prepare the figure and axes for animation
@@ -100,25 +100,54 @@ def display_image_sequence(images, start_index):
     
     # Function to update the frame
     def update(i):
-        ax.imshow(images[start_index + i], cmap='gray')
+        if images.ndim == 5:
+            ax.imshow(images[0, 0, start_index + i], cmap='gray')
+        if images.ndim == 4:
+            ax.imshow(images[0, start_index + i], cmap='gray')
+        if images.ndim == 3:
+            ax.imshow(images[start_index + i], cmap='gray')
         ax.set_title(f'Image Index: {start_index + i}')
     
     # Create animation
-    ani = FuncAnimation(fig, update, frames=20, interval=500)  # Update every 500 ms
+    ani = FuncAnimation(fig, update, frames=max_frames, interval=250, repeat=False)  # Update every 500 ms
     
-    plt.show()
+    plt.show(block=False)
+    plt.pause(3)
+    plt.close()
 
 
 # Original ConvLSTM cell as proposed by Shi et al.
 # Class Seq2Seq now tucked away in its own source file
 
+# This was designed around MNIST (Moving NIST)
+# This is structured as a 10000 x 20 x 64 x 64 numpy array
+# 10000 is the number of unique sequences
+# 20 is the number of sequences inside each sequence - this is where next frame matters
+# For MNIST, the boundary between 19-20, 39-40, etc, doesn't matter
+
+# So for our purposes on just one long sequence...we should be fine if it's chunked into 20s
+# Not sure why it's transposed though...
+    
 #MovingWave = np.load('wave-disturbance-01-100000ts-64px.npy')
+#MovingWave = np.load(wave_file).transpose(1,0,2,3)
+MovingWave = np.load('mnist_test_seq.npy').transpose(1,0,2,3)
+print("Original wave shape: ", MovingWave.shape)
+print("Image shape: ", MovingWave[0,0,:,:].shape)
+display_image_sequence(MovingWave, 0, 10)
+
+# that's all debug shit - now clear the var and start for real
+#MovingWave = np.load('wave-disturbance-01-10000ts-64px.npy')
+MovingWave = None
 MovingWave = np.load(wave_file)
 print("Original wave shape: ", MovingWave.shape)
+print("Image shape: ", MovingWave[0,:,:].shape)
+display_image_sequence(MovingWave, 100, 10)
 
 # reshape into 20-slice chunks.
 MovingWaveReshape = MovingWave.reshape(int(training_size/20), 20, 64, 64).astype(np.float32)
-print("Reshaped wave shape:", MovingWaveReshape.shape)
+print("New Wave Shape: ", MovingWaveReshape.shape)
+print("New Image shape:", MovingWaveReshape[0,0,:,:])
+display_image_sequence(MovingWave, 800, 10)
 # the shape is 10000 timesetps X 20 animations X 64 pixels X 64 pixels
 # our wave sim is 1000/10000 timesetps x 1 animation X 64 pixels X 64 pixels
 #
@@ -127,7 +156,7 @@ print("Reshaped wave shape:", MovingWaveReshape.shape)
 # which should be ok
 
 
-np.random.shuffle(MovingWaveReshape)
+#np.random.shuffle(MovingWaveReshape)
 train_idx = int(training_size/20)
 train_frac = int(train_idx/4)
 val_idx = train_idx
@@ -150,39 +179,16 @@ def collate(batch):
 
 
 # Training Data Loader
-train_loader = DataLoader(train_data, shuffle=True, batch_size=16, collate_fn=collate)
+train_loader = DataLoader(train_data, shuffle=False, batch_size=16, collate_fn=collate)
 
 # Validation Data Loader
-val_loader = DataLoader(val_data, shuffle=True, batch_size=16, collate_fn=collate)
+val_loader = DataLoader(val_data, shuffle=False, batch_size=16, collate_fn=collate)
 
 # Get a batch
 input, _ = next(iter(val_loader))
 
 # Reverse process before displaying
 input = input.cpu().numpy() * 255.0     
-
-print("First viz")
-N = 20
-#display_image_sequence(MovingWave, N)
-
-print("Second viz")
-N = 20
-#display_image_sequence(MovingWaveReshape[0,1,:,:])
-
-#for video in input.squeeze(1)[:3]:          # Loop over videos
-#    with io.BytesIO() as gif:
-#        imageio.mimsave(gif,video.astype(np.uint8),"GIF",fps=5)
-#        display(HBox([widgets.Image(value=gif.getvalue())]))
-
-# TODO: replace above with matplotlib because notebooks suck
-#fig, ax = plt.subplots()
-#ax.axis('off')
-
-#for video in input.squeeze(1)[:3]:  
-#    # Loop over videos
-#    for i in range (1,10):
-#        im = plt.imshow(video[i, :, :])
-#        plt.show()
 
 
 # The input video frames are grayscale, thus single channel
@@ -195,12 +201,22 @@ criterion = nn.BCELoss(reduction='sum')
 
 num_epochs = num_epochs
 
+# end of epoch image snapshots
+sav_input = []
+sav_target = []
+sav_output = []
+sav_input_npy = np.zeros((num_epochs, 64, 64))
+sav_target_npy = np.zeros((num_epochs, 64, 64))
+sav_output_npy = np.zeros((num_epochs, 64, 64))
+
+# method 1: using DataLoader
+print("Dataloader path")
 for epoch in range(1, num_epochs+1):
     
     train_loss = 0                                                 
     model.train()                                                  
     for batch_num, (input, target) in enumerate(train_loader, 1):  
-        output = model(input)                                     
+        output = model(input)
         loss = criterion(output.flatten(), target.flatten())       
         loss.backward()                                            
         optim.step()                                               
@@ -219,42 +235,40 @@ for epoch in range(1, num_epochs+1):
 
     print("Epoch:{} Training Loss:{:.2f} Validation Loss:{:.2f}\n".format(
         epoch, train_loss, val_loss))
+    path = "checkpoint-" + str(epoch) + ".pt"
+    torch.save({
+        'epoch': epoch,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optim.state_dict(),
+        'loss': train_loss,
+            }, path)
+    
+    # end of epoch...let's take a look-see
+
+    # save the stuffs
+    print("Saving for post-processing...")
+    sav_input.append(input)
+    sav_target.append(target)
+    sav_output.append(output)
+    sav_input_npy[epoch-1] = input[0, 0, 0, :, :].cpu()
+    sav_target_npy[epoch-1] = target[0, 0, :, :].cpu()
+    sav_output_npy[epoch-1] = output[0, 0, :, :].cpu()
 
 
-def collate_test(batch):
+    # viz the last target/output
+    if visualize:
+        print("Input shape: ", input.shape)
+        print("Target Shape: ", target.shape)
+        print("Output Shape: ", output.shape)
+        display_image_sequence(input.cpu(), 0, 1)
+        display_image_sequence(target.cpu(), 0, 1)
+        display_image_sequence(output.cpu(), 0, 1)
+    else:
+        print("In-training visualization is off")
 
-    # Last 10 frames are target
-    target = np.array(batch)[:, 10:]           
-
-    # Add channel dim, scale pixels between 0 and 1, send to GPU
-    batch = torch.tensor(batch).unsqueeze(1)          
-    batch = batch / 255.0                             
-    batch = batch.to(device)                          
-    return batch, target
-
-
-# Test Data Loader
-test_loader = DataLoader(test_data, shuffle=True, batch_size=3, collate_fn=collate_test)
-
-# Get a batch
-batch, target = next(iter(test_loader))
-
-# Initialize output sequence
-output = np.zeros(target.shape, dtype=np.uint8)
-
-# Loop over timesteps
-for timestep in range(target.shape[1]):
-    input = batch[:, :, timestep:timestep+10]   
-    output[:, timestep] = (model(input).squeeze(1).cpu() > 0.5)*255.0
-
-
-fig, (ax1, ax2) = plt.subplots(1, 2)
-
-print("Target shape: ", target.shape)
-print("Output shape: ", output.shape)
-
-for i in range(10):
-    im = ax1.imshow(target[1, i, :, :])
-    im = ax2.imshow(output[1, i, :, :])
-    plt.show()
+print("Saving epoch snapshots to snapshots.sav")
+print("Saving numpys to input/output/target-snapshots.npy")
+np.save("input-snapshot.npy", sav_input_npy)
+np.save("target-snapshot.npy", sav_target_npy)
+np.save("output-snapshot.npy", sav_output_npy)
 
